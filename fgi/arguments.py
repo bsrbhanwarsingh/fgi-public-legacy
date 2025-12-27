@@ -26,6 +26,8 @@ class Arguments:
     no_cleanup: bool
     offline_mode: bool
     verbose: bool
+    use_cache: bool
+    force_fresh: bool
 
     @staticmethod
     def create():
@@ -87,6 +89,17 @@ class Arguments:
             action="store_true",
             help="Verbose logging (useful for debugging)",
         )
+        _ = parser.add_argument(
+            "--use-cache",
+            action="store_true",
+            default=False,
+            help="Enable caching for faster decompilation and recompilation (default: False)",
+        )
+        _ = parser.add_argument(
+            "--force-fresh",
+            action="store_true",
+            help="Force fresh decompilation (ignore cache)",
+        )
 
         args = parser.parse_args()
         return Arguments(
@@ -102,6 +115,8 @@ class Arguments:
             args.no_cleanup,  # pyright: ignore[reportAny]
             args.offline_mode,  # pyright: ignore[reportAny]
             args.verbose,  # pyright: ignore[reportAny]
+            args.use_cache,  # pyright: ignore[reportAny]
+            args.force_fresh,  # pyright: ignore[reportAny]
         )
 
     def validate(self):

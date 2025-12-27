@@ -13,19 +13,72 @@ class Smali:
     @staticmethod
     def find(temp_path: Path, entrypoint: str):
         target_smali = entrypoint.split(".")[-1] + ".smali"
+        package_path = entrypoint.replace(".", "/")
 
         Logger.info(f"Looking for {target_smali}...")
+        Logger.info(f"Package path: {package_path}")
 
-        for child in (temp_path / "smali").rglob("*"):
-            if target_smali == child.name.split("/")[-1]:
-                Logger.info(f"Found at {child}")
-
-                return Smali(child)
+        # Check all possible Smali directories
+        smali_dirs = ["smali", "smali_classes2", "smali_classes3", "smali_classes4", "smali_classes5", "smali_classes6"]
+        
+        # First, try exact package path in all directories
+        for dir_name in smali_dirs:
+            smali_dir = temp_path / dir_name
+            if smali_dir.exists():
+                exact_path = smali_dir / package_path / target_smali
+                if exact_path.exists():
+                    Logger.info(f"✅ Found at exact path")
+                    return Smali(exact_path)
+        
+        # If exact path not found, search by filename in all directories
+        Logger.info("🔍 Searching by filename...")
+        for dir_name in smali_dirs:
+            smali_dir = temp_path / dir_name
+            if smali_dir.exists():
+                for child in smali_dir.rglob("*"):
+                    if child.name == target_smali:
+                        Logger.info(f"✅ Found by filename")
+                        return Smali(child)
+        
+        # If still not found, search for Unity patterns in all directories
+        Logger.info("🔍 Searching for Unity activities...")
+        unity_patterns = [
+            "UnityPlayer", "UnityActivity", "MessagingUnityPlayer", "Unity",
+            "Firebase", "Messaging", "Player", "Activity", "Main"
+        ]
+        
+        for dir_name in smali_dirs:
+            smali_dir = temp_path / dir_name
+            if smali_dir.exists():
+                for child in smali_dir.rglob("*"):
+                    if child.name.endswith(".smali"):
+                        for pattern in unity_patterns:
+                            if pattern in child.name:
+                                Logger.info(f"✅ Found Unity activity")
+                                return Smali(child)
+        
+        # Last resort: show what Smali files exist for debugging
+        Logger.info("❌ No Unity activities found")
+        total_smali_files = 0
+        
+        # Count total Smali files for debugging
+        for dir_name in smali_dirs:
+            smali_dir = temp_path / dir_name
+            if smali_dir.exists():
+                smali_files = list(smali_dir.rglob("*.smali"))
+                total_smali_files += len(smali_files)
+        
+        Logger.info(f"📊 Total .smali files: {total_smali_files}")
+        
         raise RuntimeError(f"Couldn't find smali containing entrypoint ({entrypoint})")
 
     def find_inject_point(self, start: int) -> int:
         pos = start
         in_annotation = False
+        
+        # Optimize by checking common patterns first
+        common_patterns = [".locals", ".annotation", ".end annotation"]
+        
         while pos + 1 < len(self.content):
             pos = pos + 1
             line = self.content[pos].strip()
@@ -34,27 +87,46 @@ class Smali:
             if not line:
                 continue
 
-            # skip locals
-            if line.startswith(".locals "):
-                continue
+            # Fast pattern matching
+            if any(pattern in line for pattern in common_patterns):
+                if line.startswith(".locals "):
+                    continue
+                elif line.startswith(".annotation "):
+                    in_annotation = True
+                    continue
+                elif line.startswith(".end annotation"):
+                    in_annotation = False
+                    continue
+                elif in_annotation:
+                    continue
+                else:
+                    return pos - 1
 
-            # skip annotations
-            if in_annotation or line.startswith(".annotation "):
-                in_annotation = True
-                continue
-
-            if line.startswith(".end annotation"):
-                in_annotation = False
-                continue
-
-            return pos - 1
+            # If not a common pattern, check if it's a valid injection point
+            if not in_annotation and not line.startswith("."):
+                return pos - 1
+                
         raise RuntimeError("Failed to determine injection point")
 
     def find_end_of_method(self, start: int) -> int:
+        # Optimize by searching backwards from a reasonable limit
+        search_limit = min(start + 100, len(self.content))
+        
+        for i in range(start, search_limit):
+            if ".end method" in self.content[i]:
+                end_of_method = i - 1
+                
+                # Check if the method has a return type call
+                if "return" in self.content[end_of_method]:
+                    end_of_method -= 1
+                
+                return end_of_method
+        
+        # Fallback to original method if not found in reasonable range
         end_methods = [(i + start) for i, x in enumerate(self.content[start:]) if ".end method" in x]
-
+        
         if len(end_methods) <= 0:
-            raise RuntimeError("Coundn't find the end of the existing constructor")
+            raise RuntimeError("Couldn't find the end of the existing constructor")
 
         end_of_method = end_methods[0] - 1
 
@@ -84,7 +156,7 @@ class Smali:
         defined_locals = [i for i, x in enumerate(self.content[marker:end_of_method]) if ".locals" in x]
 
         if len(defined_locals) <= 0:
-            Logger.warn("Couldn't to determine any .locals for the target constructor")
+            Logger.warn("Couldn't determine any .locals for the target constructor")
 
         # determine the offset for the first matched .locals definition
         locals_smali_offset = defined_locals[0] + marker
@@ -95,7 +167,7 @@ class Smali:
             new_locals_value = defined_local_value_as_int + 1
 
         except ValueError:
-            Logger.warn("Couldn't to parse .locals value for the injected constructor")
+            Logger.warn("Couldn't parse .locals value for the injected constructor")
             return
 
         self.content[locals_smali_offset] = self.content[locals_smali_offset].replace(str(defined_local_value_as_int), str(new_locals_value))
@@ -108,7 +180,7 @@ class Smali:
 
         # ensure we got a marker
         if len(marker) <= 0:
-            raise RuntimeError("Couldn't to determine position to inject a loadLibrary call")
+            raise RuntimeError("Couldn't determine position to inject a loadLibrary call")
 
         # pick the first position for the inject. add one line as we
         # want to inject right below the comment we matched
@@ -118,5 +190,8 @@ class Smali:
         self.update_locals(marker_value)
 
     def __del__(self):
-        with open(self.path, "w", encoding="utf8") as f:
-            f.writelines(self.content)
+        try:
+            with open(self.path, "w", encoding="utf8") as f:
+                f.writelines(self.content)
+        except IOError as e:
+            Logger.error(f"Failed to write smali file {self.path}: {e}")

@@ -31,3 +31,4 @@ build-backend = "setuptools.build_meta"
 
 [project.scripts]
 fgi = "fgi.main:main"
+fgi-optimize = "fgi.optimize_cli:main"

@@ -29,4 +29,14 @@ _SCRIPT = """
 }
 """
 
-CONFIG_TYPES = {"listen": _LISTEN, "connect": _CONNECT, "script": _SCRIPT}
+_EARLY_SCRIPT = """
+{
+    "interaction": {
+        "type": "script",
+        "path": "%s",
+        "on_change": "reload"
+    }
+}
+"""
+
+CONFIG_TYPES = {"listen": _LISTEN, "connect": _CONNECT, "script": _SCRIPT, "early_script": _EARLY_SCRIPT}

@@ -50,7 +50,7 @@ class Library:
 
         for arch in self.architectures:
             self.ensure_arch(arch)
-            Logger.info(f"Copying {arch} frida-gadget")
+            Logger.info(f"📱 Copying {arch} frida-gadget")
             if (self.get_arch_path(arch) / self.library_name).exists():
                 raise RuntimeError("frida-gadget already injected with specified name")
             copy(
